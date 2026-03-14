@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from('pets')
       .select('*')
-      .eq('status', 'available')
+      .eq('adoption_status', 'Available')
 
     if (category && category !== 'all') {
       query = query.eq('category_id', category)
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
       {
         ...body,
         created_by: user.id,
-        status: 'available',
+        adoption_status: 'Available',
       },
     ])
 

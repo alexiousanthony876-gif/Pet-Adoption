@@ -4,499 +4,452 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
-import { 
-  User, Mail, Phone, MapPin, FileText, Bell, Heart, Settings, LogOut,
-  Clock, CheckCircle2, XCircle, AlertCircle, PawPrint, ChevronRight
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
-import { useAuth } from "@/lib/auth-context"
+import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
+import { useAuth } from "@/lib/auth-context"
+import { 
+  LogOut, 
+  Heart,
+  FileText,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Loader2,
+  PawPrint,
+  Calendar,
+  MapPin
+} from "lucide-react"
+import { cn } from "@/lib/utils"
 
-export default function UserDashboard() {
+type AdoptionRequest = {
+  id: string
+  pet_id: string
+  status: "Pending" | "In Review" | "Approved" | "Rejected" | "Completed"
+  reason_for_adoption: string
+  home_type: string
+  num_family_members: number
+  created_at: string
+  rejected_reason?: string
+}
+
+type Pet = {
+  id: string
+  name: string
+  image_url: string
+  breed: string
+}
+
+type Appointment = {
+  id: string
+  adoption_request_id: string
+  scheduled_date: string
+  status: "Scheduled" | "Completed" | "Cancelled"
+  notes?: string
+}
+
+export default function DashboardPage() {
   const router = useRouter()
-  const { user: authUser, loading, signOut } = useAuth()
-  const [requests, setRequests] = useState([])
-  const [notifications, setNotifications] = useState([])
-  const [activeTab, setActiveTab] = useState("overview")
+  const supabase = createClient()
+  const { user, loading } = useAuth()
+  const [adoptionRequests, setAdoptionRequests] = useState<AdoptionRequest[]>([])
+  const [pets, setPets] = useState<Record<string, Pet>>({})
+  const [appointments, setAppointments] = useState<Appointment[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<"requests" | "appointments" | "profile">("requests")
+  const [userName, setUserName] = useState("")
 
   useEffect(() => {
-    if (loading) return
-    
-    if (!authUser) {
+    if (!loading && !user) {
       router.push("/login")
-      return
+    } else if (user) {
+      loadData()
     }
-    
-    // Fetch adoption requests and notifications from Supabase
-    const fetchData = async () => {
-      const supabase = createClient()
-      
-      // Fetch adoption requests
+  }, [user, loading])
+
+  const loadData = async () => {
+    setIsLoading(true)
+    try {
+      // Load adoption requests
       const { data: requestsData } = await supabase
-        .from('adoption_requests')
-        .select('*')
-        .eq('user_id', authUser.id)
-        .order('created_at', { ascending: false })
-      
-      setRequests(requestsData || [])
-      
-      // Fetch notifications
-      const { data: notificationsData } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', authUser.id)
-        .order('created_at', { ascending: false })
-      
-      setNotifications(notificationsData || [])
+        .from("adoption_requests")
+        .select("*")
+        .eq("user_id", user?.id)
+        .order("created_at", { ascending: false })
+
+      if (requestsData) {
+        setAdoptionRequests(requestsData)
+
+        // Load pet data
+        const petIds = [...new Set(requestsData.map(r => r.pet_id))]
+        if (petIds.length > 0) {
+          const { data: petsData } = await supabase
+            .from("pets")
+            .select("id, name, image_url, breed")
+            .in("id", petIds)
+
+          if (petsData) {
+            const petsMap = petsData.reduce((acc, pet) => ({ ...acc, [pet.id]: pet }), {})
+            setPets(petsMap)
+          }
+        }
+
+        // Load appointments
+        const { data: appointmentsData } = await supabase
+          .from("appointments")
+          .select("*")
+          .in("adoption_request_id", requestsData.map(r => r.id))
+          .order("scheduled_date", { ascending: true })
+
+        if (appointmentsData) {
+          setAppointments(appointmentsData)
+        }
+      }
+
+      // Load user profile
+      setUserName(user?.email || "User")
+    } catch (error) {
+      console.error("Error loading data:", error)
+    } finally {
+      setIsLoading(false)
     }
-    
-    fetchData()
-  }, [authUser, loading, router])
+  }
 
   const handleLogout = async () => {
-    await signOut()
+    await supabase.auth.signOut()
     router.push("/")
   }
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "approved":
+      case "Approved":
         return <CheckCircle2 className="h-5 w-5 text-green-500" />
-      case "rejected":
+      case "Rejected":
         return <XCircle className="h-5 w-5 text-red-500" />
-      case "info-requested":
-        return <AlertCircle className="h-5 w-5 text-yellow-500" />
-      default:
+      case "In Review":
         return <Clock className="h-5 w-5 text-blue-500" />
-    }
-  }
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "approved":
-        return "Approved"
-      case "rejected":
-        return "Rejected"
-      case "info-requested":
-        return "Info Requested"
       default:
-        return "Pending"
+        return <Clock className="h-5 w-5 text-yellow-500" />
     }
   }
 
   const getStatusBg = (status: string) => {
     switch (status) {
-      case "approved":
-        return "bg-green-100 text-green-700"
-      case "rejected":
-        return "bg-red-100 text-red-700"
-      case "info-requested":
-        return "bg-yellow-100 text-yellow-700"
+      case "Approved":
+        return "bg-green-500/10 text-green-400 border-green-500/20"
+      case "Rejected":
+        return "bg-red-500/10 text-red-400 border-red-500/20"
+      case "In Review":
+        return "bg-blue-500/10 text-blue-400 border-blue-500/20"
+      case "Completed":
+        return "bg-purple-500/10 text-purple-400 border-purple-500/20"
       default:
-        return "bg-blue-100 text-blue-700"
+        return "bg-yellow-500/10 text-yellow-400 border-yellow-500/20"
     }
   }
 
-  if (loading) {
+  if (loading || isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent" />
-      </div>
+      <main className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </main>
     )
   }
 
-  if (!authUser) return null
+  if (!user) {
+    return null
+  }
 
-  const pendingCount = requests.filter(r => r.status === "Pending").length
-  const approvedCount = requests.filter(r => r.status === "Approved").length
-  const unreadNotifications = notifications.filter(n => !n.is_read).length
+  const upcomingAppointments = appointments.filter(a => 
+    new Date(a.scheduled_date) > new Date() && a.status === "Scheduled"
+  )
+
+  const stats = [
+    {
+      label: "Total Applications",
+      value: adoptionRequests.length,
+      icon: FileText,
+      color: "text-blue-500"
+    },
+    {
+      label: "Approved",
+      value: adoptionRequests.filter(r => r.status === "Approved").length,
+      icon: CheckCircle2,
+      color: "text-green-500"
+    },
+    {
+      label: "Upcoming Visits",
+      value: upcomingAppointments.length,
+      icon: Calendar,
+      color: "text-purple-500"
+    },
+    {
+      label: "Under Review",
+      value: adoptionRequests.filter(r => r.status === "In Review").length,
+      icon: Clock,
+      color: "text-yellow-500"
+    },
+  ]
 
   return (
-    <div className="min-h-screen bg-background">
+    <main className="min-h-screen bg-background">
       <Navigation />
-      
-      <main className="pt-24 pb-16">
+
+      <section className="pt-28 pb-12">
         <div className="container mx-auto px-4">
-          <div className="grid lg:grid-cols-4 gap-8">
-            {/* Sidebar */}
-            <div className="lg:col-span-1">
-              <div className="glass rounded-2xl p-6 sticky top-28">
-                <div className="text-center mb-6">
-                  <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <User className="h-10 w-10 text-primary" />
+          {/* Header */}
+          <div className="flex items-start justify-between mb-12">
+            <div>
+              <h1 className="text-5xl font-bold text-foreground mb-2">Welcome Back!</h1>
+              <p className="text-lg text-muted-foreground">{userName}</p>
+            </div>
+            <Button
+              onClick={handleLogout}
+              variant="outline"
+              className="gap-2"
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </Button>
+          </div>
+
+          {/* Stats */}
+          <div className="grid md:grid-cols-4 gap-4 mb-12">
+            {stats.map((stat, i) => {
+              const Icon = stat.icon
+              return (
+                <div key={i} className="glass rounded-2xl p-6 border border-border">
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <p className="text-muted-foreground text-sm mb-1">{stat.label}</p>
+                      <p className="text-3xl font-bold text-foreground">{stat.value}</p>
+                    </div>
+                    <Icon className={cn("h-6 w-6", stat.color)} />
                   </div>
-                  <h2 className="text-xl font-bold text-foreground">
-                    {user.firstName} {user.lastName}
-                  </h2>
-                  <p className="text-muted-foreground text-sm">{user.email}</p>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-4 mb-8 border-b border-border">
+            {[
+              { id: "requests", label: "My Applications", icon: FileText },
+              { id: "appointments", label: "Appointments", icon: Calendar },
+              { id: "profile", label: "Profile", icon: PawPrint },
+            ].map((tab) => {
+              const Icon = tab.icon
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={cn(
+                    "px-4 py-3 font-medium border-b-2 transition-colors flex items-center gap-2",
+                    activeTab === tab.id
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Tab Content */}
+          {activeTab === "requests" && (
+            <div className="space-y-6">
+              {adoptionRequests.length === 0 ? (
+                <div className="glass rounded-2xl p-12 text-center">
+                  <PawPrint className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-foreground mb-2">No applications yet</h3>
+                  <p className="text-muted-foreground mb-6">
+                    Start by browsing available pets and submitting an adoption application.
+                  </p>
+                  <Link href="/pets">
+                    <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
+                      Browse Pets
+                    </Button>
+                  </Link>
+                </div>
+              ) : (
+                adoptionRequests.map((request) => {
+                  const pet = pets[request.pet_id]
+                  return (
+                    <div key={request.id} className="glass rounded-2xl border border-border overflow-hidden hover:shadow-lg transition-shadow">
+                      <div className="p-6 flex items-start gap-6">
+                        {pet?.image_url ? (
+                          <div className="relative w-24 h-24 rounded-lg overflow-hidden flex-shrink-0 bg-secondary">
+                            <Image
+                              src={pet.image_url}
+                              alt={pet.name}
+                              fill
+                              className="object-cover"
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-24 h-24 rounded-lg bg-secondary flex items-center justify-center flex-shrink-0">
+                            <PawPrint className="h-8 w-8 text-muted-foreground" />
+                          </div>
+                        )}
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-4 mb-3">
+                            <div>
+                              <h3 className="text-2xl font-bold text-foreground">{pet?.name || "Unknown"}</h3>
+                              <p className="text-sm text-muted-foreground">{pet?.breed}</p>
+                            </div>
+                            <span className={cn(
+                              "inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium border flex-shrink-0",
+                              getStatusBg(request.status)
+                            )}>
+                              {getStatusIcon(request.status)}
+                              {request.status}
+                            </span>
+                          </div>
+
+                          <p className="text-sm text-muted-foreground mb-3">
+                            Applied on {new Date(request.created_at).toLocaleDateString()}
+                          </p>
+
+                          <p className="text-sm text-foreground line-clamp-2 mb-4">
+                            {request.reason_for_adoption}
+                          </p>
+
+                          {request.rejected_reason && (
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-4">
+                              <p className="text-xs font-medium text-red-400 mb-1">Rejection Reason</p>
+                              <p className="text-sm text-red-300">{request.rejected_reason}</p>
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-4 pt-4 border-t border-border">
+                            <div className="text-sm">
+                              <span className="text-muted-foreground">Home: </span>
+                              <span className="font-medium text-foreground">{request.home_type}</span>
+                            </div>
+                            <div className="text-sm">
+                              <span className="text-muted-foreground">Family Size: </span>
+                              <span className="font-medium text-foreground">{request.num_family_members}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {request.status === "Approved" && (
+                          <Link href={`/dashboard/appointment/${request.id}`}>
+                            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground flex-shrink-0">
+                              <Calendar className="h-4 w-4 mr-2" />
+                              Schedule
+                            </Button>
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+
+          {activeTab === "appointments" && (
+            <div className="space-y-6">
+              {upcomingAppointments.length === 0 ? (
+                <div className="glass rounded-2xl p-12 text-center">
+                  <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-foreground mb-2">No upcoming appointments</h3>
+                  <p className="text-muted-foreground">
+                    Schedule a visit once your adoption application is approved.
+                  </p>
+                </div>
+              ) : (
+                upcomingAppointments.map((appointment) => {
+                  const request = adoptionRequests.find(r => r.id === appointment.adoption_request_id)
+                  const pet = request ? pets[request.pet_id] : null
+                  return (
+                    <div key={appointment.id} className="glass rounded-2xl border border-border p-6 hover:shadow-lg transition-shadow">
+                      <div className="flex items-start justify-between mb-4">
+                        <div>
+                          <h3 className="text-xl font-bold text-foreground">{pet?.name || "Unknown"}</h3>
+                          <p className="text-sm text-muted-foreground">{pet?.breed}</p>
+                        </div>
+                        <span className={cn(
+                          "inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium border",
+                          "bg-green-500/10 text-green-400 border-green-500/20"
+                        )}>
+                          <CheckCircle2 className="h-4 w-4" />
+                          Scheduled
+                        </span>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          <Calendar className="h-5 w-5 text-primary" />
+                          <div>
+                            <p className="text-sm text-muted-foreground">Appointment Date</p>
+                            <p className="font-medium text-foreground">
+                              {new Date(appointment.scheduled_date).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+
+                        {appointment.notes && (
+                          <div className="bg-secondary/50 rounded-lg p-4">
+                            <p className="text-xs text-muted-foreground mb-2">Notes</p>
+                            <p className="text-sm text-foreground">{appointment.notes}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+
+          {activeTab === "profile" && (
+            <div className="max-w-2xl">
+              <div className="glass rounded-2xl border border-border p-8 space-y-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground mb-6">Account Information</h2>
                 </div>
 
-                <nav className="space-y-2">
-                  {[
-                    { id: "overview", label: "Overview", icon: PawPrint },
-                    { id: "applications", label: "My Applications", icon: FileText, badge: pendingCount },
-                    { id: "notifications", label: "Notifications", icon: Bell, badge: unreadNotifications },
-                    { id: "favorites", label: "Favorites", icon: Heart },
-                    { id: "settings", label: "Settings", icon: Settings },
-                  ].map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => setActiveTab(item.id)}
-                      className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all ${
-                        activeTab === item.id
-                          ? "bg-primary text-primary-foreground"
-                          : "hover:bg-muted text-foreground"
-                      }`}
-                    >
-                      <span className="flex items-center gap-3">
-                        <item.icon className="h-5 w-5" />
-                        {item.label}
-                      </span>
-                      {item.badge ? (
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${
-                          activeTab === item.id 
-                            ? "bg-primary-foreground/20 text-primary-foreground" 
-                            : "bg-primary/10 text-primary"
-                        }`}>
-                          {item.badge}
-                        </span>
-                      ) : null}
-                    </button>
-                  ))}
-                </nav>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">Email Address</p>
+                    <p className="text-lg font-medium text-foreground">{user.email}</p>
+                  </div>
 
-                <div className="mt-6 pt-6 border-t border-border">
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-destructive hover:bg-destructive/10 rounded-xl transition-all"
-                  >
-                    <LogOut className="h-5 w-5" />
-                    Sign Out
-                  </button>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">Member Since</p>
+                    <p className="text-lg font-medium text-foreground">
+                      {new Date(user.created_at || "").toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-border">
+                  <h3 className="text-lg font-semibold text-foreground mb-4">Account Actions</h3>
+                  <div className="space-y-2">
+                    <Button
+                      onClick={handleLogout}
+                      variant="outline"
+                      className="w-full justify-start gap-2 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Logout
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
-
-            {/* Main Content */}
-            <div className="lg:col-span-3">
-              {/* Overview Tab */}
-              {activeTab === "overview" && (
-                <div className="space-y-6">
-                  <h1 className="text-3xl font-bold text-foreground">Welcome back, {user.firstName}!</h1>
-                  
-                  {/* Stats */}
-                  <div className="grid sm:grid-cols-3 gap-4">
-                    <div className="glass rounded-2xl p-6">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-                          <FileText className="h-6 w-6 text-blue-600" />
-                        </div>
-                        <div>
-                          <p className="text-2xl font-bold text-foreground">{requests.length}</p>
-                          <p className="text-sm text-muted-foreground">Total Applications</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="glass rounded-2xl p-6">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
-                          <Clock className="h-6 w-6 text-yellow-600" />
-                        </div>
-                        <div>
-                          <p className="text-2xl font-bold text-foreground">{pendingCount}</p>
-                          <p className="text-sm text-muted-foreground">Pending</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="glass rounded-2xl p-6">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                          <CheckCircle2 className="h-6 w-6 text-green-600" />
-                        </div>
-                        <div>
-                          <p className="text-2xl font-bold text-foreground">{approvedCount}</p>
-                          <p className="text-sm text-muted-foreground">Approved</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Recent Applications */}
-                  <div className="glass rounded-2xl p-6">
-                    <div className="flex items-center justify-between mb-6">
-                      <h2 className="text-xl font-bold text-foreground">Recent Applications</h2>
-                      <button 
-                        onClick={() => setActiveTab("applications")}
-                        className="text-primary hover:underline text-sm"
-                      >
-                        View All
-                      </button>
-                    </div>
-                    {requests.length === 0 ? (
-                      <div className="text-center py-12">
-                        <PawPrint className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
-                        <p className="text-muted-foreground mb-4">You have not submitted any adoption applications yet.</p>
-                        <Link href="/pets">
-                          <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                            Browse Pets
-                          </Button>
-                        </Link>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {requests.slice(0, 3).map((request) => (
-                          <div key={request.id} className="flex items-center gap-4 p-4 bg-muted/30 rounded-xl">
-                            <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-                              <Image
-                                src={request.petImage}
-                                alt={request.petName}
-                                fill
-                                className="object-cover"
-                              />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-foreground">{request.petName}</h3>
-                              <p className="text-sm text-muted-foreground">{request.petBreed}</p>
-                            </div>
-                            <div className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBg(request.status)}`}>
-                              {getStatusLabel(request.status)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Quick Actions */}
-                  <div className="glass rounded-2xl p-6">
-                    <h2 className="text-xl font-bold text-foreground mb-6">Quick Actions</h2>
-                    <div className="grid sm:grid-cols-2 gap-4">
-                      <Link href="/pets" className="flex items-center gap-4 p-4 bg-primary/5 hover:bg-primary/10 rounded-xl transition-all group">
-                        <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
-                          <PawPrint className="h-6 w-6 text-primary" />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-foreground">Browse Pets</h3>
-                          <p className="text-sm text-muted-foreground">Find your perfect companion</p>
-                        </div>
-                        <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
-                      </Link>
-                      <Link href="/contact" className="flex items-center gap-4 p-4 bg-primary/5 hover:bg-primary/10 rounded-xl transition-all group">
-                        <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
-                          <Mail className="h-6 w-6 text-primary" />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-foreground">Contact Support</h3>
-                          <p className="text-sm text-muted-foreground">Get help with your application</p>
-                        </div>
-                        <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Applications Tab */}
-              {activeTab === "applications" && (
-                <div className="space-y-6">
-                  <h1 className="text-3xl font-bold text-foreground">My Applications</h1>
-                  
-                  {requests.length === 0 ? (
-                    <div className="glass rounded-2xl p-12 text-center">
-                      <PawPrint className="h-16 w-16 text-muted-foreground/30 mx-auto mb-4" />
-                      <h2 className="text-xl font-bold text-foreground mb-2">No Applications Yet</h2>
-                      <p className="text-muted-foreground mb-6">Start your adoption journey today!</p>
-                      <Link href="/pets">
-                        <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                          Browse Available Pets
-                        </Button>
-                      </Link>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {requests.map((request) => (
-                        <div key={request.id} className="glass rounded-2xl p-6">
-                          <div className="flex flex-col sm:flex-row gap-6">
-                            <div className="relative w-full sm:w-32 h-32 rounded-xl overflow-hidden flex-shrink-0">
-                              <Image
-                                src={request.petImage}
-                                alt={request.petName}
-                                fill
-                                className="object-cover"
-                              />
-                            </div>
-                            <div className="flex-1">
-                              <div className="flex items-start justify-between gap-4 mb-4">
-                                <div>
-                                  <h3 className="text-xl font-bold text-foreground">{request.petName}</h3>
-                                  <p className="text-muted-foreground">{request.petBreed}</p>
-                                </div>
-                                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${getStatusBg(request.status)}`}>
-                                  {getStatusIcon(request.status)}
-                                  <span className="text-sm font-medium">{getStatusLabel(request.status)}</span>
-                                </div>
-                              </div>
-                              <div className="grid sm:grid-cols-2 gap-4 text-sm">
-                                <div>
-                                  <span className="text-muted-foreground">Applied:</span>{" "}
-                                  <span className="text-foreground">{new Date(request.createdAt).toLocaleDateString()}</span>
-                                </div>
-                                <div>
-                                  <span className="text-muted-foreground">Last Updated:</span>{" "}
-                                  <span className="text-foreground">{new Date(request.updatedAt).toLocaleDateString()}</span>
-                                </div>
-                              </div>
-                              {request.status === "approved" && (
-                                <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-xl">
-                                  <p className="text-green-700 text-sm">
-                                    Congratulations! Your adoption request has been approved. Our team will contact you shortly for the next steps.
-                                  </p>
-                                </div>
-                              )}
-                              {request.status === "rejected" && (
-                                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl">
-                                  <p className="text-red-700 text-sm">
-                                    We appreciate your interest in adopting. Unfortunately, your request could not be approved at this time.
-                                  </p>
-                                </div>
-                              )}
-                              {request.status === "info-requested" && (
-                                <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
-                                  <p className="text-yellow-700 text-sm">
-                                    Additional information is required. Please check your email or contact us for details.
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Notifications Tab */}
-              {activeTab === "notifications" && (
-                <div className="space-y-6">
-                  <h1 className="text-3xl font-bold text-foreground">Notifications</h1>
-                  
-                  {notifications.length === 0 ? (
-                    <div className="glass rounded-2xl p-12 text-center">
-                      <Bell className="h-16 w-16 text-muted-foreground/30 mx-auto mb-4" />
-                      <h2 className="text-xl font-bold text-foreground mb-2">No Notifications</h2>
-                      <p className="text-muted-foreground">You will receive notifications about your adoption applications here.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {notifications.map((notification) => (
-                        <div 
-                          key={notification.id} 
-                          className={`glass rounded-2xl p-6 ${!notification.read ? "border-l-4 border-primary" : ""}`}
-                        >
-                          <div className="flex items-start gap-4">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                              notification.type === "adoption_approved" ? "bg-green-100" :
-                              notification.type === "adoption_rejected" ? "bg-red-100" :
-                              "bg-blue-100"
-                            }`}>
-                              {notification.type === "adoption_approved" ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : notification.type === "adoption_rejected" ? (
-                                <XCircle className="h-5 w-5 text-red-600" />
-                              ) : (
-                                <Bell className="h-5 w-5 text-blue-600" />
-                              )}
-                            </div>
-                            <div className="flex-1">
-                              <h3 className="font-semibold text-foreground">{notification.title}</h3>
-                              <p className="text-muted-foreground text-sm mt-1">{notification.message}</p>
-                              <p className="text-xs text-muted-foreground mt-2">
-                                {new Date(notification.createdAt).toLocaleString()}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Favorites Tab */}
-              {activeTab === "favorites" && (
-                <div className="space-y-6">
-                  <h1 className="text-3xl font-bold text-foreground">Favorites</h1>
-                  <div className="glass rounded-2xl p-12 text-center">
-                    <Heart className="h-16 w-16 text-muted-foreground/30 mx-auto mb-4" />
-                    <h2 className="text-xl font-bold text-foreground mb-2">No Favorites Yet</h2>
-                    <p className="text-muted-foreground mb-6">Save your favorite pets here for easy access.</p>
-                    <Link href="/pets">
-                      <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                        Browse Pets
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
-              )}
-
-              {/* Settings Tab */}
-              {activeTab === "settings" && (
-                <div className="space-y-6">
-                  <h1 className="text-3xl font-bold text-foreground">Settings</h1>
-                  
-                  <div className="glass rounded-2xl p-6">
-                    <h2 className="text-xl font-bold text-foreground mb-6">Profile Information</h2>
-                    <div className="grid sm:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground">First Name</label>
-                        <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl">
-                          <User className="h-5 w-5 text-muted-foreground" />
-                          <span className="text-foreground">{user.firstName}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground">Last Name</label>
-                        <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl">
-                          <User className="h-5 w-5 text-muted-foreground" />
-                          <span className="text-foreground">{user.lastName}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground">Email</label>
-                        <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl">
-                          <Mail className="h-5 w-5 text-muted-foreground" />
-                          <span className="text-foreground">{user.email}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground">Phone</label>
-                        <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl">
-                          <Phone className="h-5 w-5 text-muted-foreground" />
-                          <span className="text-foreground">{user.phone}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-2 sm:col-span-2">
-                        <label className="text-sm font-medium text-foreground">Address</label>
-                        <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl">
-                          <MapPin className="h-5 w-5 text-muted-foreground" />
-                          <span className="text-foreground">
-                            {user.address}, {user.city}, {user.state}, {user.country}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          )}
         </div>
-      </main>
-      
+      </section>
+
       <Footer />
-    </div>
+    </main>
   )
 }

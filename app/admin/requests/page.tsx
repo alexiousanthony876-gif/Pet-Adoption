@@ -3,449 +3,427 @@
 import { useEffect, useState } from "react"
 import { 
   Search, 
-  Filter, 
   Eye, 
-  CheckCircle, 
+  CheckCircle2, 
   XCircle, 
-  HelpCircle,
-  X,
-  Mail,
-  Phone,
-  MapPin,
-  Home,
-  PawPrint,
   Clock,
-  User
+  X,
+  Loader2,
+  AlertCircle,
+  ChevronDown
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { 
-  getAdoptionRequests, 
-  updateAdoptionRequestStatus, 
-  AdoptionRequest 
-} from "@/lib/admin-store"
+import { createClient } from "@/lib/supabase/client"
+
+type AdoptionRequest = {
+  id: string
+  user_id: string
+  pet_id: string
+  status: "Pending" | "In Review" | "Approved" | "Rejected" | "Completed"
+  reason_for_adoption: string
+  home_type: string
+  other_pets?: string
+  num_family_members: number
+  experience_with_pets: string
+  approved_by?: string
+  approved_at?: string
+  rejected_reason?: string
+  created_at: string
+}
+
+type Pet = {
+  id: string
+  name: string
+}
+
+type User = {
+  id: string
+  email: string
+}
 
 export default function AdoptionRequestsPage() {
+  const supabase = createClient()
   const [requests, setRequests] = useState<AdoptionRequest[]>([])
+  const [pets, setPets] = useState<Record<string, Pet>>({})
+  const [users, setUsers] = useState<Record<string, User>>({})
   const [searchQuery, setSearchQuery] = useState("")
   const [filterStatus, setFilterStatus] = useState<string>("all")
   const [selectedRequest, setSelectedRequest] = useState<AdoptionRequest | null>(null)
-  const [mounted, setMounted] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
-  const [successMessage, setSuccessMessage] = useState("")
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
+  const [isModalLoading, setIsModalLoading] = useState(false)
+  const [rejectReason, setRejectReason] = useState("")
 
   useEffect(() => {
-    setMounted(true)
-    loadRequests()
+    loadData()
   }, [])
 
-  const loadRequests = () => {
-    const data = getAdoptionRequests()
-    setRequests(data)
+  const loadData = async () => {
+    setIsLoading(true)
+    try {
+      // Load adoption requests
+      const { data: requestsData } = await supabase
+        .from("adoption_requests")
+        .select("*")
+        .order("created_at", { ascending: false })
+
+      if (requestsData) {
+        setRequests(requestsData)
+
+        // Load pet and user data for all requests
+        const petIds = [...new Set(requestsData.map(r => r.pet_id))]
+        const userIds = [...new Set(requestsData.map(r => r.user_id))]
+
+        if (petIds.length > 0) {
+          const { data: petsData } = await supabase
+            .from("pets")
+            .select("id, name")
+            .in("id", petIds)
+
+          if (petsData) {
+            const petsMap = petsData.reduce((acc, pet) => ({ ...acc, [pet.id]: pet }), {})
+            setPets(petsMap)
+          }
+        }
+
+        if (userIds.length > 0) {
+          // Note: In a real app, you'd have a profiles table or fetch from auth
+          // For now, we'll display user_id
+          const usersMap = userIds.reduce((acc, id) => ({ ...acc, [id]: { id, email: "User" } }), {})
+          setUsers(usersMap)
+        }
+      }
+    } catch (err) {
+      setError("Failed to load adoption requests")
+      console.error(err)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  if (!mounted) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
+  const handleStatusUpdate = async (requestId: string, newStatus: string) => {
+    if (newStatus === "Rejected" && !rejectReason) {
+      setError("Please provide a rejection reason")
+      return
+    }
+
+    setIsModalLoading(true)
+    setError("")
+
+    try {
+      const updateData: any = { status: newStatus }
+      if (newStatus === "Approved") {
+        updateData.approved_at = new Date().toISOString()
+      }
+      if (newStatus === "Rejected") {
+        updateData.rejected_reason = rejectReason
+      }
+
+      const { error: updateError } = await supabase
+        .from("adoption_requests")
+        .update(updateData)
+        .eq("id", requestId)
+
+      if (updateError) {
+        setError("Failed to update request")
+      } else {
+        setSuccess(`Request ${newStatus.toLowerCase()} successfully`)
+        await loadData()
+        setSelectedRequest(null)
+        setRejectReason("")
+        setTimeout(() => setSuccess(""), 3000)
+      }
+    } catch (err) {
+      setError("An error occurred")
+    } finally {
+      setIsModalLoading(false)
+    }
   }
 
   const filteredRequests = requests.filter((request) => {
-    const matchesSearch =
-      `${request.firstName} ${request.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      request.petName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      request.email.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesSearch = 
+      (pets[request.pet_id]?.name || "").toLowerCase().includes(searchQuery.toLowerCase())
     const matchesStatus = filterStatus === "all" || request.status === filterStatus
     return matchesSearch && matchesStatus
   })
 
-  const handleStatusUpdate = (
-    requestId: string, 
-    status: AdoptionRequest["status"],
-    adminNotes?: string
-  ) => {
-    updateAdoptionRequestStatus(requestId, status, adminNotes)
-    loadRequests()
-    
-    const statusMessages = {
-      approved: "Request has been approved! Notification sent to the applicant.",
-      rejected: "Request has been rejected. Notification sent to the applicant.",
-      "info-requested": "Additional information requested. Notification sent to the applicant.",
-      pending: "Request status updated.",
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "Approved":
+        return <CheckCircle2 className="h-5 w-5 text-green-500" />
+      case "Rejected":
+        return <XCircle className="h-5 w-5 text-red-500" />
+      case "In Review":
+        return <Clock className="h-5 w-5 text-blue-500" />
+      default:
+        return <Clock className="h-5 w-5 text-yellow-500" />
     }
-    
-    setSuccessMessage(statusMessages[status])
-    setShowSuccess(true)
-    setTimeout(() => setShowSuccess(false), 3000)
-    setSelectedRequest(null)
   }
 
-  const getStatusBadge = (status: AdoptionRequest["status"]) => {
-    const styles = {
-      pending: "bg-yellow-400/10 text-yellow-400 border-yellow-400/20",
-      approved: "bg-green-400/10 text-green-400 border-green-400/20",
-      rejected: "bg-red-400/10 text-red-400 border-red-400/20",
-      "info-requested": "bg-blue-400/10 text-blue-400 border-blue-400/20",
+  const getStatusBg = (status: string) => {
+    switch (status) {
+      case "Approved":
+        return "bg-green-500/10 text-green-400"
+      case "Rejected":
+        return "bg-red-500/10 text-red-400"
+      case "In Review":
+        return "bg-blue-500/10 text-blue-400"
+      default:
+        return "bg-yellow-500/10 text-yellow-400"
     }
-    const labels = {
-      pending: "Pending",
-      approved: "Approved",
-      rejected: "Rejected",
-      "info-requested": "Info Requested",
-    }
-    return (
-      <span className={cn("px-3 py-1 rounded-full text-xs font-medium border", styles[status])}>
-        {labels[status]}
-      </span>
-    )
-  }
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-  }
-
-  const statusCounts = {
-    all: requests.length,
-    pending: requests.filter(r => r.status === "pending").length,
-    approved: requests.filter(r => r.status === "approved").length,
-    rejected: requests.filter(r => r.status === "rejected").length,
-    "info-requested": requests.filter(r => r.status === "info-requested").length,
   }
 
   return (
-    <div className="p-6 lg:p-8">
-      {/* Success Toast */}
-      {showSuccess && (
-        <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-6 py-4 rounded-xl shadow-lg flex items-center gap-3 animate-in slide-in-from-top-2">
-          <CheckCircle className="h-5 w-5" />
-          {successMessage}
+    <div className="min-h-screen bg-[#0f0f12]">
+      {/* Header */}
+      <div className="border-b border-white/10 p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">Adoption Requests</h1>
+            <p className="text-gray-400">Review and manage adoption applications</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Search and Filters */}
+      <div className="p-6 border-b border-white/10">
+        <div className="flex gap-4 flex-col md:flex-row">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-3 h-5 w-5 text-gray-500" />
+            <input
+              type="text"
+              placeholder="Search by pet name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-gray-500 focus:border-primary outline-none"
+            />
+          </div>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+          >
+            <option value="all">All Status</option>
+            <option value="Pending">Pending</option>
+            <option value="In Review">In Review</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+            <option value="Completed">Completed</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Messages */}
+      {error && (
+        <div className="mx-6 mt-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-3 text-red-400">
+          <AlertCircle className="h-5 w-5 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+      {success && (
+        <div className="mx-6 mt-6 p-4 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center gap-3 text-green-400">
+          <CheckCircle2 className="h-5 w-5 flex-shrink-0" />
+          <span>{success}</span>
         </div>
       )}
 
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Adoption Requests</h1>
-        <p className="text-gray-400">Review and manage adoption applications.</p>
-      </div>
-
-      {/* Status Tabs */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        {[
-          { value: "all", label: "All" },
-          { value: "pending", label: "Pending" },
-          { value: "approved", label: "Approved" },
-          { value: "rejected", label: "Rejected" },
-          { value: "info-requested", label: "Info Requested" },
-        ].map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setFilterStatus(tab.value)}
-            className={cn(
-              "px-4 py-2 rounded-xl text-sm font-medium transition-all",
-              filterStatus === tab.value
-                ? "bg-primary text-primary-foreground"
-                : "bg-white/5 text-gray-400 hover:text-white hover:bg-white/10"
-            )}
-          >
-            {tab.label}
-            <span className="ml-2 opacity-60">({statusCounts[tab.value as keyof typeof statusCounts]})</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Search */}
-      <div className="relative mb-6">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-500" />
-        <input
-          type="text"
-          placeholder="Search by name, pet, or email..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-12 pr-4 py-3 bg-[#1a1a1f] border border-white/10 rounded-xl text-white placeholder:text-gray-500 focus:border-primary focus:outline-none transition-colors"
-        />
-      </div>
-
-      {/* Requests Table */}
-      <div className="bg-[#1a1a1f] border border-white/10 rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-white/10">
-                <th className="text-left px-6 py-4 text-sm font-medium text-gray-400">Applicant</th>
-                <th className="text-left px-6 py-4 text-sm font-medium text-gray-400">Pet</th>
-                <th className="text-left px-6 py-4 text-sm font-medium text-gray-400">Date</th>
-                <th className="text-left px-6 py-4 text-sm font-medium text-gray-400">Status</th>
-                <th className="text-right px-6 py-4 text-sm font-medium text-gray-400">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {filteredRequests.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-16 text-center text-gray-500">
-                    No requests found matching your criteria.
-                  </td>
-                </tr>
-              ) : (
-                filteredRequests.map((request) => (
-                  <tr key={request.id} className="hover:bg-white/5 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/50 to-accent/50 flex items-center justify-center text-white font-medium">
-                          {request.firstName.charAt(0)}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            {request.firstName} {request.lastName}
-                          </p>
-                          <p className="text-xs text-gray-500">{request.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={request.petImage}
-                          alt={request.petName}
-                          className="w-10 h-10 rounded-xl object-cover"
-                        />
-                        <div>
-                          <p className="text-sm font-medium text-white">{request.petName}</p>
-                          <p className="text-xs text-gray-500">{request.petBreed}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-sm text-gray-400">{formatDate(request.createdAt)}</p>
-                    </td>
-                    <td className="px-6 py-4">
-                      {getStatusBadge(request.status)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          onClick={() => setSelectedRequest(request)}
-                          size="sm"
-                          variant="ghost"
-                          className="text-gray-400 hover:text-white"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        {request.status === "pending" && (
-                          <>
-                            <Button
-                              onClick={() => handleStatusUpdate(request.id, "approved")}
-                              size="sm"
-                              className="bg-green-500/20 text-green-400 hover:bg-green-500/30"
-                            >
-                              <CheckCircle className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              onClick={() => handleStatusUpdate(request.id, "rejected")}
-                              size="sm"
-                              className="bg-red-500/20 text-red-400 hover:bg-red-500/30"
-                            >
-                              <XCircle className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              onClick={() => handleStatusUpdate(request.id, "info-requested")}
-                              size="sm"
-                              className="bg-blue-500/20 text-blue-400 hover:bg-blue-500/30"
-                            >
-                              <HelpCircle className="h-4 w-4" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* Requests List */}
+      <div className="p-6">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 text-primary animate-spin" />
+          </div>
+        ) : filteredRequests.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-gray-400 text-lg">No adoption requests found</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredRequests.map((request) => (
+              <div
+                key={request.id}
+                className="bg-white/5 border border-white/10 rounded-lg p-4 hover:bg-white/10 transition-colors"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <h3 className="text-lg font-semibold text-white">
+                        {pets[request.pet_id]?.name || "Unknown Pet"}
+                      </h3>
+                      <span className={cn(
+                        "text-xs font-medium px-2 py-1 rounded-full flex items-center gap-1",
+                        getStatusBg(request.status)
+                      )}>
+                        {getStatusIcon(request.status)}
+                        {request.status}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-400 mb-2">
+                      Submitted {new Date(request.created_at).toLocaleDateString()}
+                    </p>
+                    <p className="text-sm text-gray-300 line-clamp-2">{request.reason_for_adoption}</p>
+                  </div>
+                  <Button
+                    onClick={() => setSelectedRequest(request)}
+                    className="ml-4 bg-primary hover:bg-primary/90 text-primary-foreground flex-shrink-0"
+                  >
+                    <Eye className="h-4 w-4 mr-2" />
+                    View
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Detail Modal */}
       {selectedRequest && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div 
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setSelectedRequest(null)}
-          />
-          <div className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-[#1a1a1f] border border-white/10 rounded-2xl">
-            <div className="sticky top-0 bg-[#1a1a1f] border-b border-white/10 px-6 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <h2 className="text-xl font-semibold text-white">Request Details</h2>
-                {getStatusBadge(selectedRequest.status)}
+          <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedRequest(null)} />
+          <div className="relative w-full max-w-2xl bg-[#1a1a1f] border border-white/10 rounded-xl p-6 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6 sticky top-0 bg-[#1a1a1f] pb-4 border-b border-white/10">
+              <div>
+                <h2 className="text-2xl font-bold text-white">
+                  {pets[selectedRequest.pet_id]?.name} - Adoption Request
+                </h2>
+                <p className="text-sm text-gray-400">
+                  Submitted {new Date(selectedRequest.created_at).toLocaleDateString()}
+                </p>
               </div>
               <button
                 onClick={() => setSelectedRequest(null)}
-                className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+                className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-6">
-              {/* Pet Info */}
-              <div className="bg-white/5 rounded-xl p-4 flex items-center gap-4">
-                <img
-                  src={selectedRequest.petImage}
-                  alt={selectedRequest.petName}
-                  className="w-20 h-20 rounded-xl object-cover"
-                />
-                <div>
-                  <h3 className="text-lg font-semibold text-white">{selectedRequest.petName}</h3>
-                  <p className="text-sm text-gray-400">{selectedRequest.petBreed}</p>
-                  <p className="text-xs text-gray-500 mt-1">Pet ID: {selectedRequest.petId}</p>
-                </div>
+            {error && (
+              <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-3 text-red-400 mb-6">
+                <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div className="space-y-6">
+              {/* Current Status */}
+              <div className="bg-white/5 rounded-lg p-4">
+                <p className="text-xs text-gray-400 mb-2">Current Status</p>
+                <span className={cn(
+                  "inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium",
+                  getStatusBg(selectedRequest.status)
+                )}>
+                  {getStatusIcon(selectedRequest.status)}
+                  {selectedRequest.status}
+                </span>
               </div>
 
-              {/* Applicant Info */}
-              <div>
-                <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  Applicant Information
-                </h4>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1">Full Name</p>
-                    <p className="text-white">{selectedRequest.firstName} {selectedRequest.lastName}</p>
-                  </div>
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-                      <Mail className="h-3 w-3" /> Email
-                    </p>
-                    <p className="text-white">{selectedRequest.email}</p>
-                  </div>
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-                      <Phone className="h-3 w-3" /> Phone
-                    </p>
-                    <p className="text-white">{selectedRequest.phone}</p>
-                  </div>
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-                      <MapPin className="h-3 w-3" /> Location
-                    </p>
-                    <p className="text-white">{selectedRequest.city}, {selectedRequest.state} {selectedRequest.zip}</p>
-                  </div>
-                </div>
-                <div className="bg-white/5 rounded-xl p-4 mt-4">
-                  <p className="text-xs text-gray-500 mb-1">Full Address</p>
-                  <p className="text-white">{selectedRequest.address}, {selectedRequest.city}, {selectedRequest.state} {selectedRequest.zip}, {selectedRequest.country}</p>
-                </div>
-              </div>
+              {/* Application Details */}
+              <div className="space-y-4">
+                <h3 className="font-semibold text-white">Application Details</h3>
 
-              {/* Living Situation */}
-              <div>
-                <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
-                  <Home className="h-4 w-4" />
-                  Living Situation
-                </h4>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1">Housing Type</p>
-                    <p className="text-white capitalize">{selectedRequest.housing}</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white/5 rounded-lg p-4">
+                    <p className="text-xs text-gray-400 mb-1">Home Type</p>
+                    <p className="text-white font-medium">{selectedRequest.home_type}</p>
                   </div>
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1">Has Yard</p>
-                    <p className="text-white capitalize">{selectedRequest.hasYard.replace("-", " ")}</p>
-                  </div>
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1">Other Pets</p>
-                    <p className="text-white capitalize">{selectedRequest.otherPets}</p>
-                    {selectedRequest.otherPetsDetails && (
-                      <p className="text-xs text-gray-400 mt-1">{selectedRequest.otherPetsDetails}</p>
-                    )}
-                  </div>
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1">Hours Alone Daily</p>
-                    <p className="text-white">{selectedRequest.hoursAlone} hours</p>
+                  <div className="bg-white/5 rounded-lg p-4">
+                    <p className="text-xs text-gray-400 mb-1">Family Size</p>
+                    <p className="text-white font-medium">{selectedRequest.num_family_members}</p>
                   </div>
                 </div>
-              </div>
 
-              {/* Experience */}
-              <div>
-                <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
-                  <PawPrint className="h-4 w-4" />
-                  Pet Experience
-                </h4>
-                <div className="bg-white/5 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 mb-1">Experience Level</p>
-                  <p className="text-white capitalize">{selectedRequest.experience.replace("-", " ")}</p>
+                <div className="bg-white/5 rounded-lg p-4">
+                  <p className="text-xs text-gray-400 mb-2">Why Adopt?</p>
+                  <p className="text-gray-300 text-sm">{selectedRequest.reason_for_adoption}</p>
                 </div>
-              </div>
 
-              {/* Reason */}
-              <div>
-                <h4 className="text-sm font-medium text-gray-400 mb-3">Reason for Adoption</h4>
-                <div className="bg-white/5 rounded-xl p-4">
-                  <p className="text-white">{selectedRequest.reason}</p>
-                </div>
-              </div>
-
-              {/* Timeline */}
-              <div>
-                <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
-                  <Clock className="h-4 w-4" />
-                  Timeline
-                </h4>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1">Submitted</p>
-                    <p className="text-white">{formatDate(selectedRequest.createdAt)}</p>
+                {selectedRequest.other_pets && (
+                  <div className="bg-white/5 rounded-lg p-4">
+                    <p className="text-xs text-gray-400 mb-2">Other Pets</p>
+                    <p className="text-gray-300 text-sm">{selectedRequest.other_pets}</p>
                   </div>
-                  <div className="bg-white/5 rounded-xl p-4">
-                    <p className="text-xs text-gray-500 mb-1">Last Updated</p>
-                    <p className="text-white">{formatDate(selectedRequest.updatedAt)}</p>
-                  </div>
-                </div>
-              </div>
+                )}
 
-              {/* Admin Notes */}
-              {selectedRequest.adminNotes && (
-                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4">
-                  <p className="text-xs text-yellow-400 mb-1">Admin Notes</p>
-                  <p className="text-white">{selectedRequest.adminNotes}</p>
+                <div className="bg-white/5 rounded-lg p-4">
+                  <p className="text-xs text-gray-400 mb-2">Pet Experience</p>
+                  <p className="text-gray-300 text-sm">{selectedRequest.experience_with_pets || "Not provided"}</p>
                 </div>
-              )}
+
+                {selectedRequest.rejected_reason && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+                    <p className="text-xs text-red-400 mb-2">Rejection Reason</p>
+                    <p className="text-red-300 text-sm">{selectedRequest.rejected_reason}</p>
+                  </div>
+                )}
+              </div>
 
               {/* Actions */}
-              {selectedRequest.status === "pending" && (
-                <div className="flex flex-wrap gap-3 pt-4 border-t border-white/10">
-                  <Button
-                    onClick={() => handleStatusUpdate(selectedRequest.id, "approved")}
-                    className="flex-1 bg-green-500 hover:bg-green-600 text-white rounded-xl"
-                  >
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Approve Application
-                  </Button>
-                  <Button
-                    onClick={() => handleStatusUpdate(selectedRequest.id, "rejected")}
-                    className="flex-1 bg-red-500 hover:bg-red-600 text-white rounded-xl"
-                  >
-                    <XCircle className="h-4 w-4 mr-2" />
-                    Reject Application
-                  </Button>
-                  <Button
-                    onClick={() => handleStatusUpdate(selectedRequest.id, "info-requested")}
-                    className="flex-1 bg-blue-500 hover:bg-blue-600 text-white rounded-xl"
-                  >
-                    <HelpCircle className="h-4 w-4 mr-2" />
-                    Request More Info
-                  </Button>
+              {selectedRequest.status === "Pending" && (
+                <div className="space-y-4 pt-6 border-t border-white/10">
+                  <div className="flex gap-3">
+                    <Button
+                      onClick={() => handleStatusUpdate(selectedRequest.id, "In Review")}
+                      disabled={isModalLoading}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      {isModalLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Clock className="h-4 w-4 mr-2" />}
+                      Move to Review
+                    </Button>
+                  </div>
                 </div>
               )}
+
+              {selectedRequest.status === "In Review" && (
+                <div className="space-y-4 pt-6 border-t border-white/10">
+                  <div className="flex gap-3">
+                    <Button
+                      onClick={() => handleStatusUpdate(selectedRequest.id, "Approved")}
+                      disabled={isModalLoading}
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      {isModalLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
+                      Approve
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        if (rejectReason) {
+                          handleStatusUpdate(selectedRequest.id, "Rejected")
+                        }
+                      }}
+                      disabled={isModalLoading || !rejectReason}
+                      className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+                    >
+                      {isModalLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <XCircle className="h-4 w-4 mr-2" />}
+                      Reject
+                    </Button>
+                  </div>
+                  {true && (
+                    <div>
+                      <label className="block text-sm text-white mb-2">Rejection reason (if rejecting)</label>
+                      <textarea
+                        value={rejectReason}
+                        onChange={(e) => setRejectReason(e.target.value)}
+                        placeholder="Explain why this application is being rejected..."
+                        className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-gray-500 focus:border-primary outline-none resize-none"
+                        rows={3}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <Button
+                onClick={() => setSelectedRequest(null)}
+                variant="outline"
+                className="w-full"
+              >
+                Close
+              </Button>
             </div>
           </div>
         </div>
