@@ -37,8 +37,8 @@ const features = [
 
 function FeatureCard({ feature, index }: { feature: typeof features[0]; index: number }) {
   return (
-    <div className="group glass rounded-3xl p-8 transition-all duration-500 hover:shadow-xl hover:scale-[1.02]"
-      )}
+    <div 
+      className="group glass rounded-3xl p-8 transition-all duration-500 hover:shadow-xl hover:scale-[1.02]"
       style={{ transitionDelay: `${index * 100}ms` }}
     >
       <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 group-hover:bg-primary/20 transition-colors">
