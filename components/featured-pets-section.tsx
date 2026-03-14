@@ -5,23 +5,14 @@ import { ArrowRight } from "lucide-react"
 import Link from "next/link"
 import { PetCard } from "@/components/pet-card"
 import { pets } from "@/lib/pets-data"
-import { useInView } from "@/hooks/use-in-view"
-import { cn } from "@/lib/utils"
 
 export function FeaturedPetsSection() {
-  const { ref: headerRef, isInView: headerInView } = useInView({ threshold: 0.1 })
   const featuredPets = pets.slice(0, 6)
 
   return (
     <section className="py-24">
       <div className="container mx-auto px-4">
-        <div
-          ref={headerRef}
-          className={cn(
-            "flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-12 transition-all duration-700",
-            headerInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          )}
-        >
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-12">
           <div>
             <span className="text-primary font-semibold tracking-wide uppercase text-sm">
               Featured Pets

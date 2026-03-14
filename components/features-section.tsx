@@ -1,8 +1,6 @@
 "use client"
 
 import { Heart, Search, Shield, Home, Clock, Award } from "lucide-react"
-import { useInView } from "@/hooks/use-in-view"
-import { cn } from "@/lib/utils"
 
 const features = [
   {
@@ -38,16 +36,8 @@ const features = [
 ]
 
 function FeatureCard({ feature, index }: { feature: typeof features[0]; index: number }) {
-  const { ref, isInView } = useInView({ threshold: 0.1 })
-
   return (
-    <div
-      ref={ref}
-      className={cn(
-        "group glass rounded-3xl p-8 transition-all duration-500 hover:shadow-xl hover:scale-[1.02]",
-        isInView
-          ? "opacity-100 translate-y-0"
-          : "opacity-0 translate-y-8"
+    <div className="group glass rounded-3xl p-8 transition-all duration-500 hover:shadow-xl hover:scale-[1.02]"
       )}
       style={{ transitionDelay: `${index * 100}ms` }}
     >

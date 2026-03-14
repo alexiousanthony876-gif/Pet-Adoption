@@ -1,8 +1,6 @@
 "use client"
 
 import { Star, Quote } from "lucide-react"
-import { useInView } from "@/hooks/use-in-view"
-import { cn } from "@/lib/utils"
 
 const testimonials = [
   {
@@ -32,15 +30,9 @@ const testimonials = [
 ]
 
 function TestimonialCard({ testimonial, index }: { testimonial: typeof testimonials[0]; index: number }) {
-  const { ref, isInView } = useInView({ threshold: 0.1 })
-
   return (
     <div
-      ref={ref}
-      className={cn(
-        "glass rounded-3xl p-8 transition-all duration-700",
-        isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-      )}
+      className="glass rounded-3xl p-8 transition-all duration-700"
       style={{ transitionDelay: `${index * 150}ms` }}
     >
       <Quote className="h-10 w-10 text-primary/30 mb-4" />

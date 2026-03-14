@@ -3,12 +3,8 @@
 import { Button } from "@/components/ui/button"
 import { ArrowRight, Heart, PawPrint } from "lucide-react"
 import Link from "next/link"
-import { useInView } from "@/hooks/use-in-view"
-import { cn } from "@/lib/utils"
 
 export function CTASection() {
-  const { ref, isInView } = useInView({ threshold: 0.1 })
-
   return (
     <section className="py-24 relative overflow-hidden">
       {/* Background decorations */}
@@ -17,13 +13,7 @@ export function CTASection() {
       <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl" />
       
       <div className="container mx-auto px-4 relative z-10">
-        <div
-          ref={ref}
-          className={cn(
-            "glass rounded-[3rem] p-12 md:p-16 text-center transition-all duration-700",
-            isInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          )}
-        >
+        <div className="glass rounded-[3rem] p-12 md:p-16 text-center">
           <div className="flex justify-center gap-4 mb-8">
             <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center animate-bounce-slow">
               <PawPrint className="h-8 w-8 text-primary" />
