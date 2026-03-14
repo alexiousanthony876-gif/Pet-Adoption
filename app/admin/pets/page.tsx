@@ -7,82 +7,124 @@ import {
   Edit2, 
   Trash2, 
   X,
+  CheckCircle,
+  AlertCircle,
   Upload,
-  CheckCircle
+  Loader2,
+  Eye
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { Pet } from "@/components/pet-card"
-import { getPets, addPet, updatePet, deletePet } from "@/lib/admin-store"
-import { breeds, locations } from "@/lib/pets-data"
+import { createClient } from "@/lib/supabase/client"
+import Image from "next/image"
 
-type PetType = "dog" | "cat" | "rabbit" | "bird" | "other"
+type Pet = {
+  id: string
+  name: string
+  breed: string
+  age_months: number
+  gender: "Male" | "Female"
+  category_id: string
+  description: string
+  image_url: string
+  model_3d_url?: string
+  health_status: "Healthy" | "Under Treatment" | "Recovering"
+  vaccination_status: "Completed" | "Pending" | "Partial"
+  adoption_status: "Available" | "Pending Adoption" | "Adopted" | "Reserved"
+  weight_kg?: number
+  color?: string
+  special_needs?: string
+}
+
+type Category = {
+  id: string
+  name: string
+  description?: string
+}
 
 const initialPetForm: Omit<Pet, "id"> = {
   name: "",
-  type: "dog",
   breed: "",
-  age: "",
-  gender: "male",
-  location: "",
-  image: "",
+  age_months: 0,
+  gender: "Male",
+  category_id: "",
   description: "",
-  temperament: [],
-  size: "medium",
+  image_url: "",
+  health_status: "Healthy",
+  vaccination_status: "Pending",
+  adoption_status: "Available",
 }
 
 export default function PetManagementPage() {
+  const supabase = createClient()
   const [pets, setPets] = useState<Pet[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [searchQuery, setSearchQuery] = useState("")
-  const [filterType, setFilterType] = useState<string>("all")
+  const [filterStatus, setFilterStatus] = useState<string>("all")
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingPet, setEditingPet] = useState<Pet | null>(null)
   const [formData, setFormData] = useState(initialPetForm)
-  const [temperamentInput, setTemperamentInput] = useState("")
-  const [mounted, setMounted] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
-  const [successMessage, setSuccessMessage] = useState("")
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
 
+  // Load pets and categories on mount
   useEffect(() => {
-    setMounted(true)
-    loadPets()
+    loadData()
   }, [])
 
-  const loadPets = () => {
-    const petsData = getPets()
-    setPets(petsData)
-  }
+  const loadData = async () => {
+    setIsLoading(true)
+    try {
+      // Load categories
+      const { data: categoriesData } = await supabase
+        .from("pet_categories")
+        .select("*")
+        .order("name")
+      
+      if (categoriesData) {
+        setCategories(categoriesData)
+      }
 
-  if (!mounted) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
+      // Load pets
+      const { data: petsData, error: petsError } = await supabase
+        .from("pets")
+        .select("*")
+        .order("created_at", { ascending: false })
+      
+      if (petsError) {
+        setError("Failed to load pets")
+      } else if (petsData) {
+        setPets(petsData)
+      }
+    } catch (err) {
+      setError("Error loading data")
+    } finally {
+      setIsLoading(false)
+    }
   }
-
-  const filteredPets = pets.filter((pet) => {
-    const matchesSearch = 
-      pet.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      pet.breed.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesType = filterType === "all" || pet.type === filterType
-    return matchesSearch && matchesType
-  })
 
   const handleOpenModal = (pet?: Pet) => {
+    setError("")
+    setSuccess("")
     if (pet) {
       setEditingPet(pet)
       setFormData({
         name: pet.name,
-        type: pet.type,
         breed: pet.breed,
-        age: pet.age,
+        age_months: pet.age_months,
         gender: pet.gender,
-        location: pet.location,
-        image: pet.image,
+        category_id: pet.category_id,
         description: pet.description,
-        temperament: pet.temperament,
-        size: pet.size,
+        image_url: pet.image_url,
+        health_status: pet.health_status,
+        vaccination_status: pet.vaccination_status,
+        adoption_status: pet.adoption_status,
+        weight_kg: pet.weight_kg,
+        color: pet.color,
+        special_needs: pet.special_needs,
+        model_3d_url: pet.model_3d_url,
       })
     } else {
       setEditingPet(null)
@@ -95,401 +137,492 @@ export default function PetManagementPage() {
     setIsModalOpen(false)
     setEditingPet(null)
     setFormData(initialPetForm)
-    setTemperamentInput("")
+    setError("")
+    setSuccess("")
   }
 
-  const handleAddTemperament = () => {
-    if (temperamentInput.trim() && !formData.temperament.includes(temperamentInput.trim())) {
-      setFormData((prev) => ({
-        ...prev,
-        temperament: [...prev.temperament, temperamentInput.trim()],
-      }))
-      setTemperamentInput("")
-    }
-  }
-
-  const handleRemoveTemperament = (trait: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      temperament: prev.temperament.filter((t) => t !== trait),
-    }))
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    if (editingPet) {
-      const updatedPet: Pet = {
-        ...formData,
-        id: editingPet.id,
+    setError("")
+    setSuccess("")
+    setIsSaving(true)
+
+    try {
+      if (!formData.name || !formData.breed || !formData.category_id) {
+        setError("Please fill in all required fields")
+        setIsSaving(false)
+        return
       }
-      updatePet(updatedPet)
-      setSuccessMessage(`${formData.name} has been updated successfully!`)
-    } else {
-      const newPet: Pet = {
-        ...formData,
-        id: `pet-${Date.now()}`,
+
+      if (editingPet) {
+        // Update existing pet
+        const { error } = await supabase
+          .from("pets")
+          .update(formData)
+          .eq("id", editingPet.id)
+        
+        if (error) {
+          setError("Failed to update pet: " + error.message)
+        } else {
+          setSuccess("Pet updated successfully!")
+          await loadData()
+          setTimeout(() => handleCloseModal(), 1500)
+        }
+      } else {
+        // Add new pet
+        const { error } = await supabase
+          .from("pets")
+          .insert([formData])
+        
+        if (error) {
+          setError("Failed to add pet: " + error.message)
+        } else {
+          setSuccess("Pet added successfully!")
+          await loadData()
+          setTimeout(() => handleCloseModal(), 1500)
+        }
       }
-      addPet(newPet)
-      setSuccessMessage(`${formData.name} has been added successfully!`)
+    } catch (err: any) {
+      setError(err.message || "An error occurred")
+    } finally {
+      setIsSaving(false)
     }
-    
-    loadPets()
-    handleCloseModal()
-    setShowSuccess(true)
-    setTimeout(() => setShowSuccess(false), 3000)
   }
 
-  const handleDelete = (petId: string) => {
-    if (confirm("Are you sure you want to remove this pet?")) {
-      const pet = pets.find(p => p.id === petId)
-      deletePet(petId)
-      loadPets()
-      setSuccessMessage(`${pet?.name || "Pet"} has been removed.`)
-      setShowSuccess(true)
-      setTimeout(() => setShowSuccess(false), 3000)
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this pet?")) return
+
+    try {
+      const { error } = await supabase
+        .from("pets")
+        .delete()
+        .eq("id", id)
+      
+      if (error) {
+        setError("Failed to delete pet")
+      } else {
+        setSuccess("Pet deleted successfully")
+        setPets(pets.filter(p => p.id !== id))
+      }
+    } catch (err) {
+      setError("Error deleting pet")
     }
   }
 
-  const availableBreeds = breeds[formData.type as PetType] || []
+  const filteredPets = pets.filter((pet) => {
+    const matchesSearch = 
+      pet.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      pet.breed.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesStatus = filterStatus === "all" || pet.adoption_status === filterStatus
+    return matchesSearch && matchesStatus
+  })
+
+  const getCategoryName = (id: string) => {
+    return categories.find(c => c.id === id)?.name || "Unknown"
+  }
 
   return (
-    <div className="p-6 lg:p-8">
-      {/* Success Toast */}
-      {showSuccess && (
-        <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-6 py-4 rounded-xl shadow-lg flex items-center gap-3 animate-in slide-in-from-top-2">
-          <CheckCircle className="h-5 w-5" />
-          {successMessage}
-        </div>
-      )}
-
+    <div className="min-h-screen bg-[#0f0f12]">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Pet Management</h1>
-          <p className="text-gray-400">Add, edit, and manage pets available for adoption.</p>
-        </div>
-        <Button
-          onClick={() => handleOpenModal()}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl"
-        >
-          <Plus className="h-5 w-5 mr-2" />
-          Add New Pet
-        </Button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <div className="relative flex-1">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-500" />
-          <input
-            type="text"
-            placeholder="Search pets by name or breed..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 bg-[#1a1a1f] border border-white/10 rounded-xl text-white placeholder:text-gray-500 focus:border-primary focus:outline-none transition-colors"
-          />
-        </div>
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          className="px-4 py-3 bg-[#1a1a1f] border border-white/10 rounded-xl text-white focus:border-primary focus:outline-none transition-colors cursor-pointer"
-        >
-          <option value="all">All Types</option>
-          <option value="dog">Dogs</option>
-          <option value="cat">Cats</option>
-          <option value="rabbit">Rabbits</option>
-          <option value="bird">Birds</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-
-      {/* Pets Grid */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {filteredPets.map((pet) => (
-          <div
-            key={pet.id}
-            className="bg-[#1a1a1f] border border-white/10 rounded-2xl overflow-hidden hover:border-white/20 transition-all group"
-          >
-            <div className="relative aspect-square">
-              <img
-                src={pet.image}
-                alt={pet.name}
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="absolute bottom-4 left-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button
-                  onClick={() => handleOpenModal(pet)}
-                  size="sm"
-                  className="flex-1 bg-white/20 backdrop-blur-sm hover:bg-white/30 text-white rounded-lg"
-                >
-                  <Edit2 className="h-4 w-4 mr-1" />
-                  Edit
-                </Button>
-                <Button
-                  onClick={() => handleDelete(pet.id)}
-                  size="sm"
-                  variant="destructive"
-                  className="bg-red-500/80 hover:bg-red-500 rounded-lg"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <div className="p-4">
-              <div className="flex items-start justify-between mb-2">
-                <h3 className="font-semibold text-white">{pet.name}</h3>
-                <span className="text-xs px-2 py-1 bg-primary/20 text-primary rounded-full capitalize">
-                  {pet.type}
-                </span>
-              </div>
-              <p className="text-sm text-gray-400">{pet.breed}</p>
-              <p className="text-xs text-gray-500 mt-1">{pet.age} | {pet.location}</p>
-            </div>
+      <div className="border-b border-white/10 p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">Pet Management</h1>
+            <p className="text-gray-400">Manage all pets in the adoption system</p>
           </div>
-        ))}
+          <Button
+            onClick={() => handleOpenModal()}
+            className="bg-primary hover:bg-primary/90 text-primary-foreground"
+          >
+            <Plus className="h-5 w-5 mr-2" />
+            Add Pet
+          </Button>
+        </div>
       </div>
 
-      {filteredPets.length === 0 && (
-        <div className="text-center py-16">
-          <p className="text-gray-500">No pets found matching your criteria.</p>
+      {/* Search and Filters */}
+      <div className="p-6 border-b border-white/10">
+        <div className="flex gap-4 flex-col md:flex-row">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-3 h-5 w-5 text-gray-500" />
+            <input
+              type="text"
+              placeholder="Search by name or breed..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-gray-500 focus:border-primary outline-none"
+            />
+          </div>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+          >
+            <option value="all">All Status</option>
+            <option value="Available">Available</option>
+            <option value="Pending Adoption">Pending Adoption</option>
+            <option value="Adopted">Adopted</option>
+            <option value="Reserved">Reserved</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Messages */}
+      {error && (
+        <div className="mx-6 mt-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-3 text-red-400">
+          <AlertCircle className="h-5 w-5 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+      {success && (
+        <div className="mx-6 mt-6 p-4 bg-green-500/10 border border-green-500/20 rounded-lg flex items-center gap-3 text-green-400">
+          <CheckCircle className="h-5 w-5 flex-shrink-0" />
+          <span>{success}</span>
         </div>
       )}
 
-      {/* Add/Edit Modal */}
+      {/* Pets Table */}
+      <div className="p-6">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 text-primary animate-spin" />
+          </div>
+        ) : filteredPets.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-gray-400 text-lg">No pets found</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4">
+            {filteredPets.map((pet) => (
+              <div
+                key={pet.id}
+                className="bg-white/5 border border-white/10 rounded-lg p-4 hover:bg-white/10 transition-colors"
+              >
+                <div className="flex items-start gap-4">
+                  {pet.image_url && (
+                    <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0">
+                      <Image
+                        src={pet.image_url}
+                        alt={pet.name}
+                        width={80}
+                        height={80}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <h3 className="text-lg font-semibold text-white">{pet.name}</h3>
+                      <span className={cn(
+                        "text-xs font-medium px-2 py-1 rounded-full",
+                        pet.adoption_status === "Available" && "bg-green-500/20 text-green-400",
+                        pet.adoption_status === "Pending Adoption" && "bg-yellow-500/20 text-yellow-400",
+                        pet.adoption_status === "Adopted" && "bg-blue-500/20 text-blue-400",
+                        pet.adoption_status === "Reserved" && "bg-purple-500/20 text-purple-400",
+                      )}>
+                        {pet.adoption_status}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-400 mb-2">
+                      {getCategoryName(pet.category_id)} • {pet.breed} • {pet.age_months} months • {pet.gender}
+                    </p>
+                    <p className="text-sm text-gray-300 line-clamp-1">{pet.description}</p>
+                    <div className="mt-3 flex gap-2 flex-wrap">
+                      <span className="text-xs bg-white/10 px-2 py-1 rounded text-gray-300">
+                        Health: {pet.health_status}
+                      </span>
+                      <span className="text-xs bg-white/10 px-2 py-1 rounded text-gray-300">
+                        Vaccine: {pet.vaccination_status}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleOpenModal(pet)}
+                      className="text-gray-400 hover:text-white hover:bg-white/10"
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDelete(pet.id)}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div 
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={handleCloseModal}
-          />
-          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-[#1a1a1f] border border-white/10 rounded-2xl">
-            <div className="sticky top-0 bg-[#1a1a1f] border-b border-white/10 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-white">
+          <div className="absolute inset-0 bg-black/50" onClick={handleCloseModal} />
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-[#1a1a1f] border border-white/10 rounded-xl p-6">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between mb-6 sticky top-0 bg-[#1a1a1f] pb-4 border-b border-white/10">
+              <h2 className="text-2xl font-bold text-white">
                 {editingPet ? "Edit Pet" : "Add New Pet"}
               </h2>
               <button
                 onClick={handleCloseModal}
-                className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+                className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            
-            <form onSubmit={handleSubmit} className="p-6 space-y-6">
-              {/* Image URL */}
+
+            {/* Modal Content */}
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {error && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-3 text-red-400">
+                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {/* Basic Info */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Image URL
+                <label className="block text-sm font-medium text-white mb-2">
+                  Pet Name *
                 </label>
-                <div className="flex gap-3">
-                  <input
-                    type="url"
-                    value={formData.image}
-                    onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                    placeholder="https://example.com/pet-image.jpg"
-                    className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-gray-500 focus:border-primary focus:outline-none transition-colors"
-                    required
-                  />
-                  {formData.image && (
-                    <img
-                      src={formData.image}
-                      alt="Preview"
-                      className="w-12 h-12 rounded-xl object-cover"
-                    />
-                  )}
-                </div>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                  placeholder="Enter pet name"
+                  required
+                />
               </div>
 
-              {/* Name & Type */}
-              <div className="grid sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Pet Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Enter pet name"
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-gray-500 focus:border-primary focus:outline-none transition-colors"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Type
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Category *
                   </label>
                   <select
-                    value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value as PetType, breed: "" })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:border-primary focus:outline-none transition-colors cursor-pointer"
+                    value={formData.category_id}
+                    onChange={(e) => setFormData({ ...formData, category_id: e.target.value })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
                     required
                   >
-                    <option value="dog">Dog</option>
-                    <option value="cat">Cat</option>
-                    <option value="rabbit">Rabbit</option>
-                    <option value="bird">Bird</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Breed & Age */}
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Breed
-                  </label>
-                  <select
-                    value={formData.breed}
-                    onChange={(e) => setFormData({ ...formData, breed: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:border-primary focus:outline-none transition-colors cursor-pointer"
-                    required
-                  >
-                    <option value="">Select breed</option>
-                    {availableBreeds.map((breed) => (
-                      <option key={breed} value={breed}>{breed}</option>
+                    <option value="">Select category</option>
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
                     ))}
                   </select>
                 </div>
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Age
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Breed *
                   </label>
                   <input
                     type="text"
-                    value={formData.age}
-                    onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                    placeholder="e.g., 2 years"
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-gray-500 focus:border-primary focus:outline-none transition-colors"
+                    value={formData.breed}
+                    onChange={(e) => setFormData({ ...formData, breed: e.target.value })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                    placeholder="Enter breed"
                     required
                   />
                 </div>
               </div>
 
-              {/* Gender & Size */}
-              <div className="grid sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Age (months)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.age_months}
+                    onChange={(e) => setFormData({ ...formData, age_months: parseInt(e.target.value) })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                    placeholder="0"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-white mb-2">
                     Gender
                   </label>
                   <select
                     value={formData.gender}
-                    onChange={(e) => setFormData({ ...formData, gender: e.target.value as "male" | "female" })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:border-primary focus:outline-none transition-colors cursor-pointer"
-                    required
+                    onChange={(e) => setFormData({ ...formData, gender: e.target.value as "Male" | "Female" })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
                   >
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
                   </select>
                 </div>
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Size
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Weight (kg)
                   </label>
-                  <select
-                    value={formData.size}
-                    onChange={(e) => setFormData({ ...formData, size: e.target.value as "small" | "medium" | "large" })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:border-primary focus:outline-none transition-colors cursor-pointer"
-                    required
-                  >
-                    <option value="small">Small</option>
-                    <option value="medium">Medium</option>
-                    <option value="large">Large</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Location */}
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Location
-                </label>
-                <select
-                  value={formData.location}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:border-primary focus:outline-none transition-colors cursor-pointer"
-                  required
-                >
-                  <option value="">Select location</option>
-                  {locations.map((loc) => (
-                    <option key={loc} value={loc}>{loc}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Temperament */}
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Temperament
-                </label>
-                <div className="flex gap-2 mb-2">
                   <input
-                    type="text"
-                    value={temperamentInput}
-                    onChange={(e) => setTemperamentInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddTemperament())}
-                    placeholder="Add trait (e.g., Friendly)"
-                    className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-gray-500 focus:border-primary focus:outline-none transition-colors"
+                    type="number"
+                    step="0.1"
+                    value={formData.weight_kg || ""}
+                    onChange={(e) => setFormData({ ...formData, weight_kg: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                    placeholder="0.0"
                   />
-                  <Button
-                    type="button"
-                    onClick={handleAddTemperament}
-                    className="bg-white/10 hover:bg-white/20 text-white rounded-xl"
-                  >
-                    Add
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {formData.temperament.map((trait) => (
-                    <span
-                      key={trait}
-                      className="px-3 py-1 bg-primary/20 text-primary rounded-full text-sm flex items-center gap-2"
-                    >
-                      {trait}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveTemperament(trait)}
-                        className="hover:text-white"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ))}
                 </div>
               </div>
 
               {/* Description */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-white mb-2">
                   Description
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Describe the pet's personality, history, and needs..."
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-gray-500 focus:border-primary focus:outline-none transition-colors min-h-[120px] resize-none"
-                  required
+                  className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none resize-none"
+                  placeholder="Enter pet description"
+                  rows={3}
                 />
               </div>
 
-              {/* Actions */}
-              <div className="flex gap-3 pt-4">
+              {/* Status Fields */}
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Health Status
+                  </label>
+                  <select
+                    value={formData.health_status}
+                    onChange={(e) => setFormData({ ...formData, health_status: e.target.value as any })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                  >
+                    <option value="Healthy">Healthy</option>
+                    <option value="Under Treatment">Under Treatment</option>
+                    <option value="Recovering">Recovering</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Vaccination Status
+                  </label>
+                  <select
+                    value={formData.vaccination_status}
+                    onChange={(e) => setFormData({ ...formData, vaccination_status: e.target.value as any })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                  >
+                    <option value="Completed">Completed</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Partial">Partial</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Adoption Status
+                  </label>
+                  <select
+                    value={formData.adoption_status}
+                    onChange={(e) => setFormData({ ...formData, adoption_status: e.target.value as any })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                  >
+                    <option value="Available">Available</option>
+                    <option value="Pending Adoption">Pending Adoption</option>
+                    <option value="Adopted">Adopted</option>
+                    <option value="Reserved">Reserved</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* URLs */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Image URL
+                  </label>
+                  <input
+                    type="url"
+                    value={formData.image_url}
+                    onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                    placeholder="https://..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-white mb-2">
+                    3D Model URL
+                  </label>
+                  <input
+                    type="url"
+                    value={formData.model_3d_url || ""}
+                    onChange={(e) => setFormData({ ...formData, model_3d_url: e.target.value })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                    placeholder="https://...model.glb"
+                  />
+                </div>
+              </div>
+
+              {/* Additional Info */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Color
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.color || ""}
+                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                    placeholder="e.g., Brown and White"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-white mb-2">
+                    Special Needs
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.special_needs || ""}
+                    onChange={(e) => setFormData({ ...formData, special_needs: e.target.value })}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:border-primary outline-none"
+                    placeholder="e.g., Requires regular medication"
+                  />
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              <div className="flex gap-4 pt-6">
                 <Button
                   type="button"
+                  variant="outline"
                   onClick={handleCloseModal}
-                  variant="ghost"
-                  className="flex-1 text-gray-400 hover:text-white hover:bg-white/10 rounded-xl"
+                  className="flex-1"
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
-                  className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl"
+                  disabled={isSaving}
+                  className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
                 >
-                  {editingPet ? "Update Pet" : "Add Pet"}
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    editingPet ? "Update Pet" : "Add Pet"
+                  )}
                 </Button>
               </div>
             </form>

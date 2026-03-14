@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Mail, Lock, User, Phone, MapPin, Briefcase, PawPrint, Loader2, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { registerUser } from "@/lib/admin-store"
+import { signUp } from "@/lib/auth"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 
@@ -46,26 +46,22 @@ export default function SignupPage() {
     setIsLoading(true)
     setError("")
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500))
-
-    const user = registerUser({
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      email: formData.email,
-      phone: formData.phone,
-      address: formData.address,
-      city: formData.city,
-      state: formData.state,
-      country: formData.country,
-      occupation: formData.occupation,
-      password: formData.password,
-    })
+    const fullName = `${formData.firstName} ${formData.lastName}`
+    const { data, error } = await signUp(
+      formData.email,
+      formData.password,
+      fullName,
+      'customer'
+    )
     
-    if (user) {
+    if (error) {
+      setError(error.message || "An error occurred during signup. Please try again.")
+      setIsLoading(false)
+      return
+    }
+    
+    if (data.user) {
       setStep(3) // Success step
-    } else {
-      setError("An account with this email already exists.")
     }
     
     setIsLoading(false)

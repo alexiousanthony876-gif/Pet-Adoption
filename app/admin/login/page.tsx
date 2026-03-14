@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { PawPrint, Lock, Mail, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { loginAdmin } from "@/lib/admin-store"
+import { signIn } from "@/lib/auth"
 import Link from "next/link"
 
 export default function AdminLoginPage() {
@@ -20,14 +20,18 @@ export default function AdminLoginPage() {
     setError("")
     setIsLoading(true)
 
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    const { data, error } = await signIn(email, password)
+    
+    if (error) {
+      setError(error.message || "Invalid email or password")
+      setIsLoading(false)
+      return
+    }
 
-    const user = loginAdmin(email, password)
-    if (user) {
+    if (data.user?.user_metadata?.user_type === 'admin') {
       router.push("/admin")
     } else {
-      setError("Invalid email or password")
+      setError("You do not have admin access. Please contact the administrator.")
     }
     setIsLoading(false)
   }

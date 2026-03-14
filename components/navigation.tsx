@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { Menu, X, Heart, PawPrint, Settings, User, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { getUserAuth, logoutUser, type User as UserType } from "@/lib/admin-store"
+import { useAuth } from "@/lib/auth-context"
 
 const navLinks = [
   { href: "/", label: "Home" },
@@ -17,26 +17,20 @@ const navLinks = [
 
 export function Navigation() {
   const router = useRouter()
+  const { user, signOut } = useAuth()
   const [isScrolled, setIsScrolled] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-  const [user, setUser] = useState<UserType | null>(null)
 
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 20)
     }
     window.addEventListener("scroll", handleScroll)
-    
-    // Check for logged in user
-    const authUser = getUserAuth()
-    setUser(authUser)
-    
     return () => window.removeEventListener("scroll", handleScroll)
   }, [])
 
-  const handleLogout = () => {
-    logoutUser()
-    setUser(null)
+  const handleLogout = async () => {
+    await signOut()
     router.push("/")
   }
 

@@ -17,7 +17,7 @@ import {
   ChevronRight
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { isAdminAuthenticated, logoutAdmin, getNotifications, getAdminAuth } from "@/lib/admin-store"
+import { useAuth } from "@/lib/auth-context"
 
 const navItems = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -35,42 +35,26 @@ export default function AdminLayout({
 }) {
   const router = useRouter()
   const pathname = usePathname()
+  const { user, loading, isAdmin, signOut } = useAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
-  const [adminName, setAdminName] = useState("")
-  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  useEffect(() => {
-    if (!mounted) return
-    
     // Skip auth check for login page
     if (pathname === "/admin/login") return
 
-    if (!isAdminAuthenticated()) {
+    // Wait for auth to load, then check if user is admin
+    if (!loading && (!user || !isAdmin)) {
       router.push("/admin/login")
-      return
     }
-
-    const admin = getAdminAuth()
-    if (admin) {
-      setAdminName(admin.name)
-    }
-
-    // Update unread count
-    const notifications = getNotifications()
-    setUnreadCount(notifications.filter(n => !n.read).length)
-  }, [pathname, router, mounted])
+  }, [user, loading, isAdmin, pathname, router])
 
   // Don't render sidebar on login page
   if (pathname === "/admin/login") {
     return <>{children}</>
   }
 
-  if (!mounted) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-[#0f0f12] flex items-center justify-center">
         <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
@@ -78,8 +62,8 @@ export default function AdminLayout({
     )
   }
 
-  const handleLogout = () => {
-    logoutAdmin()
+  const handleLogout = async () => {
+    await signOut()
     router.push("/admin/login")
   }
 
@@ -131,11 +115,11 @@ export default function AdminLayout({
         <div className="p-4 border-t border-white/10">
           <div className="flex items-center gap-3 px-4 py-3 mb-2">
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white font-semibold">
-              {adminName.charAt(0)}
+              {user?.email?.charAt(0).toUpperCase() || "A"}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">{adminName}</p>
-              <p className="text-xs text-gray-500">Super Admin</p>
+              <p className="text-sm font-medium text-white truncate">{user?.email || "Admin"}</p>
+              <p className="text-xs text-gray-500">Administrator</p>
             </div>
           </div>
           <button

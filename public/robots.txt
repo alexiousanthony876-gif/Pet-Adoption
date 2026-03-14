@@ -1,0 +1,26 @@
+# Pet Adoption Platform - SEO Robot Rules
+User-agent: *
+Allow: /
+Allow: /pets
+Allow: /dashboard
+Allow: /about
+Allow: /contact
+
+Disallow: /admin/
+Disallow: /api/
+Disallow: /auth/
+Disallow: /*.json$
+Disallow: /?*
+Disallow: /*?sort=
+Disallow: /*?order=
+
+# Crawl delay
+Crawl-delay: 1
+
+# Sitemap
+Sitemap: https://pet-adoption.vercel.app/sitemap.xml
+
+# Specific rules for Googlebot
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 0

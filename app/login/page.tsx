@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Mail, Lock, PawPrint, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { loginUser } from "@/lib/admin-store"
+import { signIn } from "@/lib/auth"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 
@@ -24,15 +24,16 @@ export default function LoginPage() {
     setIsLoading(true)
     setError("")
 
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000))
-
-    const user = loginUser(formData.email, formData.password)
+    const { data, error } = await signIn(formData.email, formData.password)
     
-    if (user) {
+    if (error) {
+      setError(error.message || "Invalid email or password. Please try again.")
+      setIsLoading(false)
+      return
+    }
+    
+    if (data.user) {
       router.push("/dashboard")
-    } else {
-      setError("Invalid email or password. Please try again.")
     }
     
     setIsLoading(false)

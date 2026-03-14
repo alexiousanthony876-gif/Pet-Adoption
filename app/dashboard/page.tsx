@@ -11,38 +11,52 @@ import {
 import { Button } from "@/components/ui/button"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
-import { 
-  getUserAuth, 
-  logoutUser, 
-  getUserAdoptionRequests, 
-  getUserNotifications,
-  type User as UserType,
-  type AdoptionRequest,
-  type Notification
-} from "@/lib/admin-store"
+import { useAuth } from "@/lib/auth-context"
+import { createClient } from "@/lib/supabase/client"
 
 export default function UserDashboard() {
   const router = useRouter()
-  const [user, setUser] = useState<UserType | null>(null)
-  const [requests, setRequests] = useState<AdoptionRequest[]>([])
-  const [notifications, setNotifications] = useState<Notification[]>([])
+  const { user: authUser, loading, signOut } = useAuth()
+  const [requests, setRequests] = useState([])
+  const [notifications, setNotifications] = useState([])
   const [activeTab, setActiveTab] = useState("overview")
-  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const authUser = getUserAuth()
+    if (loading) return
+    
     if (!authUser) {
       router.push("/login")
       return
     }
-    setUser(authUser)
-    setRequests(getUserAdoptionRequests(authUser.email))
-    setNotifications(getUserNotifications(authUser.email))
-    setIsLoading(false)
-  }, [router])
+    
+    // Fetch adoption requests and notifications from Supabase
+    const fetchData = async () => {
+      const supabase = createClient()
+      
+      // Fetch adoption requests
+      const { data: requestsData } = await supabase
+        .from('adoption_requests')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .order('created_at', { ascending: false })
+      
+      setRequests(requestsData || [])
+      
+      // Fetch notifications
+      const { data: notificationsData } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .order('created_at', { ascending: false })
+      
+      setNotifications(notificationsData || [])
+    }
+    
+    fetchData()
+  }, [authUser, loading, router])
 
-  const handleLogout = () => {
-    logoutUser()
+  const handleLogout = async () => {
+    await signOut()
     router.push("/")
   }
 
@@ -85,7 +99,7 @@ export default function UserDashboard() {
     }
   }
 
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent" />
@@ -93,11 +107,11 @@ export default function UserDashboard() {
     )
   }
 
-  if (!user) return null
+  if (!authUser) return null
 
-  const pendingCount = requests.filter(r => r.status === "pending").length
-  const approvedCount = requests.filter(r => r.status === "approved").length
-  const unreadNotifications = notifications.filter(n => !n.read).length
+  const pendingCount = requests.filter(r => r.status === "Pending").length
+  const approvedCount = requests.filter(r => r.status === "Approved").length
+  const unreadNotifications = notifications.filter(n => !n.is_read).length
 
   return (
     <div className="min-h-screen bg-background">
